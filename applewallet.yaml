@@ -1,0 +1,220 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: applewallet
+    in-service: "true"
+  name: applewallet
+  namespace: '${ parameters.NAMESPACE }'
+spec:
+  selector:
+    matchLabels:
+      app: applewallet
+  minReadySeconds: 10
+  revisionHistoryLimit: 10
+  strategy:
+    rollingUpdate:
+      maxSurge: 50%
+      maxUnavailable: 20%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: applewallet
+        in-service: "true"
+    spec:
+      volumes:
+      - name: applewallet-volume
+        secret:
+          secretName: apple-cert
+      containers:
+      - env:
+        - name: SPRING_CLOUD_CONFIG_URI
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: config_server_uri
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: new_relic_environment_name
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: new_relic_app_agent_license_key
+        - name: NEW_RELIC_DISTRIBUTED_TRACING_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: new_relic_distributed_tracing_enabled
+        - name: APP_NAME
+          value: '${ parameters.NEW_RELIC_APP_NAME }'
+        - name: SPRING_CLOUD_CONFIG_LABEL
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: spring_cloud_config_label
+        - name: FEO_SITE_CONFIG_DEFAULT_ENV_INSTANCE
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: feo_site_config_default_env_instance
+        - name: JAVA_OPTS
+          valueFrom:
+            configMapKeyRef:
+              name: javaoptions-configs
+              key: applewallet_java_opts
+        - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: kafka_bootstrap_servers
+        - name: SPRING_REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: redis_host
+        - name: SPRING_REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: redis_port
+        - name: FUSION_SERVER_BASE_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: FUSION_SERVER_BASE_DOMAIN
+        - name: APIGEE_EDGE_SERVER_BASE_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: APIGEE_EDGE_SERVER_BASE_DOMAIN
+        - name: CMS_SERVER_BASE_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: cms_url
+        - name: MS_SVC_BASE_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: MS_SVC_BASE_DOMAIN
+        - name: CONFIG_SERVER_SVC_BASE_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: CONFIG_SERVER_SVC_BASE_DOMAIN
+        - name: SPRING_DATA_CASSANDRA_CONTACT_POINTS
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: SPRING_DATA_CASSANDRA_CONTACT_POINTS
+        - name: CACHE_ASSEMBLER_SVC_BASE_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: CACHE_ASSEMBLER_SVC_BASE_DOMAIN
+        - name: APPLEWALLET_PASSCERTIFICATE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: applewallet_passcertificate_password
+              name: firedatastore-secrets
+        - name: applewallet_passcertificate_location
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: applewallet_passcertificate_location
+        - name: applewallet_appledevcertificate_location
+          valueFrom:
+            configMapKeyRef:
+              name: ms-configs
+              key: applewallet_appledevcertificate_location
+        envFrom:
+        - configMapRef:
+            name: app-configs
+        - secretRef:
+            name: firedatastore-secrets
+        image: us.gcr.io/production-project-195021/docker-image-ecom-apple-wallet
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 14
+          httpGet:
+            path: /apis/services/applewallet/v1.0/health
+            port: 6030
+            scheme: HTTP
+          initialDelaySeconds: 75
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: applewallet
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 12
+          httpGet:
+            path: /apis/services/applewallet/v1.0/health
+            port: 6030
+            scheme: HTTP
+          initialDelaySeconds: 75
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 5
+        volumeMounts:
+        - mountPath: /opt/ssl
+          name: applewallet-volume
+        resources:
+          limits:
+            cpu: "3"
+            memory: 4Gi
+          requests:
+            cpu: "3"
+            memory: 4Gi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+      - name: prod-gcr-account
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: applewallet
+  namespace: '${ parameters.NAMESPACE }'
+spec:
+  maxReplicas: '${ #toInt( parameters.MAX_REPLICAS )}'
+  minReplicas: '${ #toInt( parameters.MIN_REPLICAS )}'
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: applewallet
+  targetCPUUtilizationPercentage: 50
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: applewallet-svc
+  namespace: '${ parameters.NAMESPACE }'
+spec:
+  ports:
+  - name: app-port
+    port: 6030
+    protocol: TCP
+    targetPort: 6030
+  - name: mgmt-port
+    port: 6031
+    protocol: TCP
+    targetPort: 6031
+  selector:
+    app: applewallet
+    in-service: "true"
+  sessionAffinity: None
+  type: NodePort
